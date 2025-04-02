@@ -52,11 +52,19 @@ tag1.tag2.tag3~final  "final"
 #include <bits/stdc++.h>
 #include <sstream>
 
+bool isOpenningTag(const std::string& tag) {
+    return tag[0] == '<' && tag[1] != '/';
+}
+
+bool isClosingTag(const std::string& tag) {
+    return tag[0] == '<' && tag[1] == '/';
+}
+
 class Tag {
 private:
     std::string name;
     std::unordered_map<std::string, std::string> attributes;
-    std::unordered_map<std::string, Tag*> children; 
+    std::unordered_map<std::string, Tag*> children;
 
 public:
     Tag(const std::string& name) : name(name) {}
@@ -101,6 +109,7 @@ public:
     friend std::ostream& operator<<(std::ostream& os, const Tag& tag) {
         static int indentLevel = 0;
         std::string indent(indentLevel * 4, ' ');
+
         os << indent << "<" << tag.name;
         for (const auto &attr : tag.attributes)
         {
@@ -123,21 +132,118 @@ public:
 
 class TagTree {
 private:
-    Tag* root;
-    Tag* currentTag;
+    Tag* rootTag = nullptr;
+    std::unordered_map<std::string, Tag*> tagMap;
+    std::stack<Tag*> tagStack;
+    std::stack<Tag*> completedTagStack;
 
 public:
-    TagTree() : root(nullptr) {}
-    Tag* getRoot() const { return this->root; }
+    TagTree() {};
+
+    void buildTree(std::vector<std::string> lines) {
+        for(std::string line : lines) {
+            if(isOpenningTag(line)) {
+                std::stringstream ss(line);
+    
+                std::string tagName;
+                ss >> tagName;
+                tagName = tagName.substr(1, std::string::npos);
+    
+                Tag* newTag = new Tag(tagName);
+                tagMap[tagName] = newTag;
+            
+                std::string attrStr = line.substr(tagName.length() + 2, line.length() - tagName.length() - 3);
+    
+                ss = std::stringstream(attrStr);
+                std::string attrPair;
+    
+                int cnt = 1;
+                std::string attrName, attrValue;
+                while(ss >> attrPair) {
+                    switch (cnt)
+                    {
+                        case 1:
+                            attrName = attrPair;
+                            cnt += 1;
+                            break;
+    
+                        case 2:
+                            // This is the '=' part
+                            cnt += 1;
+                            break;
+                        
+                        case 3:
+                            attrValue = attrPair.substr(1, attrPair.length() - 2);
+                            cnt += 1;
+                            break;
+                    }
+    
+                    if(cnt > 3) {
+                        cnt = 1;
+                        newTag->addAttribute(attrName, attrValue);
+                    }
+                }
+                
+                if(!rootTag) {
+                    this->rootTag = newTag;
+                    this->tagStack.push(rootTag);
+                } else {
+                    this->tagStack.push(newTag);
+                }
+    
+            } else if (isClosingTag(line)) {
+                // </tag-name>
+                 std::string tagName = line.substr(2, line.length() - 3);
+
+                if(tagName == tagStack.top()->getName()) {
+                    Tag* tag = tagStack.top();
+                    tagStack.pop();
+                    completedTagStack.push(tag);
+
+                    while (!completedTagStack.empty()) {
+                        Tag* completedTag = completedTagStack.top();
+                        this->completedTagStack.pop();
+                        
+                        // We don't want the root tag to be added as a child of itself
+                        if(tagStack.empty()) {
+                            break;
+                        } else {
+                            Tag* parentTag = tagStack.top();
+                            parentTag->setChild(completedTag->getName(), completedTag);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Tag* getRootTag() const {
+        return this->rootTag;
+    }
+
+    Tag* getTag(const std::string& tagName) const {
+        auto it = this->tagMap.find(tagName);
+        if(it != this->tagMap.end()) {
+            return it->second;
+        } else {
+            return nullptr;
+        }
+    }
+
+    friend std::ostream& operator<<(std::ostream& os, const TagTree& tree) {
+        static int indentLevel = 0;
+        std::string indent(indentLevel * 4, ' ');
+
+        os << std::endl;
+        if(tree.rootTag) {
+            os << *(tree.rootTag);
+        } else {
+            os << "" << std::endl;
+        }
+
+        return os;
+    }    
 };
-
-bool isOpenningTag(const std::string& tag) {
-    return tag[0] == '<' && tag[1] != '/';
-}
-
-bool isClosingTag(const std::string& tag) {
-    return tag[0] == '<' && tag[1] == '/';
-}
 
 int main () {
     std::ios::sync_with_stdio(false);
@@ -145,114 +251,66 @@ int main () {
 
     std::stack<Tag*> tagStack;
     std::stack<Tag*> completedTagStack;
-
-    Tag* rootTag = nullptr;
+    std::unordered_map<std::string, Tag*> tagMap;
 
     int N, Q;
     std::cin >> N >> Q;
     std::cin.ignore();
 
+    std::vector<std::string> lines(N);
     // <tag-name attribute1-name = "value1" attribute2-name = "value2" ...>
     for(int i = 1; i <= N; i++){
         std::string line;
         std::getline(std::cin, line);
+        lines.push_back(line);
+    }
 
-        if(isOpenningTag(line)) {
-            std::stringstream ss(line);
+    TagTree tagTree;
+    tagTree.buildTree(lines);
 
-            std::string tagName;
-            ss >> tagName;
-            tagName = tagName.substr(1, std::string::npos);
+    for(int i = 1; i <= Q; i++){
+        std::string query;
+        std::getline(std::cin, query);
 
-            Tag* newTag = new Tag(tagName);
+        std::stringstream ss(query);
+
+        int separtorIdx = query.find("~");
+        std::string tagPath = query.substr(0, separtorIdx);
+        std::string attrName = query.substr(separtorIdx + 1, std::string::npos);
         
-            std::string attrStr = line.substr(tagName.length() + 2, line.length() - tagName.length() - 3);
+        std::string tagName;
+        std::vector<std::string> tagNames;
+        ss = std::stringstream(tagPath);
+        while (getline(ss, tagName, '.')) {
+            tagNames.push_back(tagName);
+        }
 
-            ss = std::stringstream(attrStr);
-            std::string attrPair;
+        Tag* tag = tagTree.getTag(tagNames[0]);
+        Tag* root = tagTree.getRootTag();
 
-            int cnt = 1;
-            std::string attrName, attrValue;
-            while(ss >> attrPair) {
-                switch (cnt)
-                {
-                    case 1:
-                        attrName = attrPair;
-                        cnt += 1;
-                        break;
-
-                    case 2:
-                        // This is the '=' part
-                        cnt += 1;
-                        break;
-                    
-                    case 3:
-                        attrValue = attrPair.substr(1, attrPair.length() - 2);
-                        cnt += 1;
-                        break;
-                }
-
-                if(cnt > 3) {
-                    cnt = 1;
-                    newTag->addAttribute(attrName, attrValue);
-                }
+        if(tag != root) {
+            std::cout << "Not Found!" << std::endl;
+            continue;
+        } else {
+            if(tagNames.size() == 1) {
+                std::cout << tag->getAttribute(attrName) << std::endl;
             }
-            
-            if(!rootTag) {
-                rootTag = newTag;
-                tagStack.push(rootTag);
-            } else {
-                tagStack.push(newTag);
-            }
+            else if(tagNames.size() > 1) {
+                for(int j = 1; j < tagNames.size(); j++) {
+                    tag = tag->getChild(tagNames[j]);
 
-        } else if (isClosingTag(line)) {
-            // </tag-name>
-            std::string tagName = line.substr(2, line.length() - 3);
-
-            if(tagName == tagStack.top()->getName()) {
-                Tag* tag = tagStack.top();
-                tagStack.pop();
-                completedTagStack.push(tag);
-
-                while (!completedTagStack.empty()) {
-                    Tag* completedTag = completedTagStack.top();
-                    completedTagStack.pop();
-                    
-                    // We don't want the root tag to be added as a child of itself
-                    if(tagStack.empty()) {
+                    if(tag == nullptr) {
+                        std::cout << "Not Found!" << std::endl;
                         break;
-                    } else {
-                        Tag* parentTag = tagStack.top();
-                        parentTag->setChild(completedTag->getName(), completedTag);
+                    }
+
+                    if(j == tagNames.size() - 1) {
+                        std::cout << tag->getAttribute(attrName) << std::endl;
                     }
                 }
             }
         }
     }
-
-    std::cout << std::endl << (*rootTag) << std::endl;
-    
-    // for(int i = 1; i <= Q; i++){
-    //     std::string query;
-    //     std::getline(std::cin, query);
-
-    //     std::string tagAccess = query.substr(0, query.find("~"));
-    //     std::string targetTagName  = tagAccess.substr(tagAccess.find_last_of(".") + 1, std::string::npos);
-    //     std::string attrName = query.substr(query.find("~") + 1, std::string::npos);
-        
-    //     if(targetTagName == root->getName()) {
-    //         std::cout << root->getAttribute(attrName) << std::endl;
-    //         continue;;    
-    //     }
-
-    //     Tag* targetTag = tagTree->getRoot()->getChild(targetTagName);
-    //     if(targetTag == nullptr) {
-    //         std::cout << "Not Found!" << std::endl;
-    //         continue;
-    //     } else {
-    //         std::cout << targetTag->getAttribute(attrName) << std::endl;
-    //     }
-    // }
 
     return 0;
 }

@@ -2,7 +2,7 @@
 .vscode/
 
 # Ignore all executables
-*.exe
+**/*.exe
 
 # Ignore temporary files
-*temCodeRunnerFile.*
+**/tempCodeRunnerFile.*
